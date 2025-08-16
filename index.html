@@ -1,222 +1,407 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-
-const unitLayout = [
-  ["", "Room 5", "Room 6", "Room 7", "Room 8"],
-  ["Room 4", "", "", "", "", "Room 9"],
-  ["Room 3", "", "", "", "", "Room 10"],
-  ["Room 2", "", "", "", "", "Room 11"],
-  ["Room 1", "", "", "", "", "Room 12"],
-  ["", "", "", "", "", "Room 13"],
-  ["", "", "", "", "", "Room 14"],
-  ["", "", "", "", "", "Room 15"],
-  ["", "", "Room 18", "Room 17", "Room 16"]
-];
-
-const labels = ["WR", "OR", "AAP", "Pediatric", "CRRT", "Floor Boarder"];
-
-const ShiftAssignmentWorksheet = () => {
-  const [assignments, setAssignments] = useState({});
-  const [selectedLabel, setSelectedLabel] = useState(null);
-  const [customLabel, setCustomLabel] = useState("");
-  const [mode, setMode] = useState(null);
-  const [numNurses, setNumNurses] = useState("");
-  const [pairings, setPairings] = useState([]);
-  const [selectedRooms, setSelectedRooms] = useState([]);
-  const [lines, setLines] = useState([]);
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>RN Assignment Worksheet</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #nurseCalculator { margin-bottom: 20px; }
+    #nurseCalculator label { font-size: 1em; }
+    #nurseCalculator input { font-size: 1em; padding: 5px; width: 80px; }
+    #nurseResult { font-weight: bold; margin-left: 10px; }
+    button.modeBtn, button.labelBtn {
+      font-size: 1em;
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+    }
+    button.modeBtn.active, button.labelBtn.active {
+      background-color: #4CAF50;
+      color: white;
+    }
+    #labelButtons, #customLabelDiv { margin-bottom: 20px; }
+    .diagram-container {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(6, 100px);
+      grid-template-rows: repeat(9, 100px);
+      gap: 10px;
+      justify-content: center;
+      border: 1px solid #ccc;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    .room {
+      border: 2px solid #333;
+      text-align: center;
+      line-height: 100px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s;
+      overflow: hidden;
+      background-color: white;
+      color: black;
+    }
+    .room.single {
+      background-color: green;
+      color: white;
+      border-radius: 50%;
+    }
+    .room.assigned.double:not(.empty),
+    .room.assigned.float:not(.empty) {
+      border: none !important;
+    }
+    .room.empty {
+      background-color: red;
+      color: white;
+    }
+    .room.selected { border-color: orange; }
+    .room-labels {
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+    }
+    .room-label {
+      font-size: 0.7em;
+      background: rgba(200,200,200,0.9);
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .diagram-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .room-number {
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2em;
+    }
+    #customLabelInput {
+      font-size: 1em;
+      padding: 5px;
+      width: 150px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Nurse Assignment Worksheet</h1>
   
-  // Container ref for computing line positions
-  const containerRef = useRef(null);
-  // Room refs for each room element
-  const roomRefs = useRef({});
-
-  // Handle clicks on room boxes based on the current mode/label selection
-  const handleRoomClick = (room) => {
-    setAssignments((prev) => {
-      const updated = { ...prev };
-      if (mode === "single") {
-        updated[room] = { ...updated[room], single: !updated[room]?.single, empty: false };
-      } else if (mode === "empty") {
-        updated[room] = { ...updated[room], empty: !updated[room]?.empty, single: false };
-      } else if (mode === "pair") {
-        setSelectedRooms((prevRooms) => {
-          const updatedRooms = [...prevRooms, room];
-          if (updatedRooms.length === 2) {
-            setPairings(prevPairings => [...prevPairings, updatedRooms]);
-            return [];
-          }
-          return updatedRooms;
-        });
-      } else if (selectedLabel) {
-        // Toggle label ensuring no duplicates in a room's labels
-        const currentLabels = updated[room]?.labels || [];
-        if (currentLabels.includes(selectedLabel)) {
-          updated[room] = {
-            ...updated[room],
-            labels: currentLabels.filter(label => label !== selectedLabel)
-          };
-        } else {
-          updated[room] = {
-            ...updated[room],
-            labels: [...currentLabels, selectedLabel]
-          };
-        }
+  <div id="nurseCalculator">
+    <label for="numNurses">Number of Nurses:</label>
+    <input type="number" id="numNurses" min="9" max="18" oninput="calculateNurses()">
+    <span id="nurseResult"></span>
+  </div>
+  
+  <button id="toggleMode" class="modeBtn active">
+    Mode: Single (Click to switch to Double)
+  </button>
+  <button id="resetPairsBtn" class="modeBtn">
+    Reset Pairs
+  </button>
+  
+  <div id="labelButtons">
+    <button class="labelBtn" data-label="OR">OR</button>
+    <button class="labelBtn" data-label="WR">WR</button>
+    <button class="labelBtn" data-label="Pediatric">Pediatric</button>
+    <button class="labelBtn" data-label="Floor Boarder">Floor Boarder</button>
+  </div>
+  
+  <div id="customLabelDiv">
+    <input type="text" id="customLabelInput" placeholder="Custom Label">
+    <button id="customLabelBtn" class="labelBtn">Custom</button>
+  </div>
+  
+  <div class="diagram-container" id="diagramContainer">
+    <svg class="diagram-svg" id="diagramSVG"></svg>
+  </div>
+  
+  <script>
+    function calculateNurses() {
+      var numNurses = parseInt(document.getElementById("numNurses").value);
+      if (isNaN(numNurses)) {
+        document.getElementById("nurseResult").textContent = "";
+        return;
       }
-      return updated;
+      var y = 18 - numNurses;
+      var x = numNurses - y;
+      if (x < 0 || y < 0) {
+        document.getElementById("nurseResult").textContent = 
+          "Invalid input. Nurses must be between 9 and 18.";
+        return;
+      }
+      document.getElementById("nurseResult").textContent = 
+        "# of Singles: " + x + ", # of Doubles: " + y;
+    }
+    
+    var currentMode = "single";
+    var currentLabel = "";
+    var doublePairs = [];
+    var floatPairs = [];
+    
+    var toggleModeBtn = document.getElementById("toggleMode");
+    toggleModeBtn.addEventListener("click", function() {
+      if (currentMode === "single") {
+        currentMode = "double";
+        this.textContent = "Mode: Double (Click to switch to Float)";
+      } else if (currentMode === "double") {
+        currentMode = "float";
+        this.textContent = "Mode: Float (Click to switch to Empty)";
+      } else if (currentMode === "float") {
+        currentMode = "empty";
+        this.textContent = "Mode: Empty (Click to switch to Single)";
+        clearTemporarySelections();
+      } else if (currentMode === "empty") {
+        currentMode = "single";
+        this.textContent = "Mode: Single (Click to switch to Double)";
+      }
+      clearTemporarySelections();
+      clearLabelSelection();
     });
-  };
-
-  // Compute line positions for each pairing
-  useEffect(() => {
-    const computeLines = () => {
-      if (!containerRef.current) return;
-      const containerRect = containerRef.current.getBoundingClientRect();
-      const newLines = pairings.map(pair => {
-        const [room1, room2] = pair;
-        const el1 = roomRefs.current[room1];
-        const el2 = roomRefs.current[room2];
-        if (el1 && el2) {
-          const rect1 = el1.getBoundingClientRect();
-          const rect2 = el2.getBoundingClientRect();
-          const x1 = rect1.left + rect1.width / 2 - containerRect.left;
-          const y1 = rect1.top + rect1.height / 2 - containerRect.top;
-          const x2 = rect2.left + rect2.width / 2 - containerRect.left;
-          const y2 = rect2.top + rect2.height / 2 - containerRect.top;
-          return { x1, y1, x2, y2 };
+    
+    var labelButtons = document.querySelectorAll("#labelButtons .labelBtn");
+    labelButtons.forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        if (this.classList.contains("active")) {
+          currentLabel = "";
+          this.classList.remove("active");
+        } else {
+          clearLabelSelection();
+          this.classList.add("active");
+          currentLabel = this.getAttribute("data-label");
         }
-        return null;
-      }).filter(line => line !== null);
-      setLines(newLines);
+      });
+    });
+    
+    var customLabelBtn = document.getElementById("customLabelBtn");
+    customLabelBtn.addEventListener("click", function() {
+      var input = document.getElementById("customLabelInput");
+      var text = input.value.trim();
+      if (text !== "") {
+        clearLabelSelection();
+        this.classList.add("active");
+        currentLabel = text;
+      } else {
+        currentLabel = "";
+        this.classList.remove("active");
+      }
+    });
+    
+    function clearLabelSelection() {
+      document.querySelectorAll(".labelBtn").forEach(function(btn) {
+        btn.classList.remove("active");
+      });
+      currentLabel = "";
+    }
+    
+    function clearTemporarySelections() {
+      document.querySelectorAll(".room.selected").forEach(function(room) {
+        room.classList.remove("selected");
+      });
+    }
+    
+    function getAttachmentPoint(roomEl) {
+      var rect = roomEl.getBoundingClientRect();
+      var num = parseInt(roomEl.dataset.roomId);
+      if (num >= 1 && num <= 4) {
+        return { x: rect.right, y: rect.top + rect.height / 2 };
+      } else if (num >= 5 && num <= 8) {
+        return { x: rect.left + rect.width / 2, y: rect.bottom };
+      } else if (num >= 9 && num <= 15) {
+        return { x: rect.left, y: rect.top + rect.height / 2 };
+      } else if (num >= 16 && num <= 18) {
+        return { x: rect.left + rect.width / 2, y: rect.top };
+      }
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+    
+    function getControlPointCustom(x1, y1, x2, y2, offset, num1, num2) {
+      var midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+      if ((num1 >= 1 && num1 <= 4 && num2 >= 5 && num2 <= 8) ||
+          (num2 >= 1 && num2 <= 4 && num1 >= 5 && num1 <= 8)) {
+        return { cx: midX, cy: midY + offset };
+      }
+      if (num1 >= 1 && num1 <= 4 && num2 >= 1 && num2 <= 4) {
+        return { cx: midX + offset, cy: midY };
+      }
+      if (num1 >= 16 && num1 <= 18 && num2 >= 16 && num2 <= 18) {
+        return { cx: midX, cy: midY - offset };
+      }
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) return { cx: midX, cy: midY };
+      var px = -dy / len, py = dx / len;
+      return { cx: midX + px * offset, cy: midY + py * offset };
+    }
+    
+    function updatePairLines() {
+      var svg = document.getElementById("diagramSVG");
+      svg.innerHTML = "";
+      var containerRect = document.getElementById("diagramContainer").getBoundingClientRect();
+      var archOffset = 90;
+      function drawArch(pair, dashed) {
+        var point1 = getAttachmentPoint(pair[0]);
+        var point2 = getAttachmentPoint(pair[1]);
+        var x1 = point1.x - containerRect.left;
+        var y1 = point1.y - containerRect.top;
+        var x2 = point2.x - containerRect.left;
+        var y2 = point2.y - containerRect.top;
+        var num1 = parseInt(pair[0].dataset.roomId);
+        var num2 = parseInt(pair[1].dataset.roomId);
+        var control = getControlPointCustom(x1, y1, x2, y2, archOffset, num1, num2);
+        var pathStr = `M ${x1} ${y1} Q ${control.cx} ${control.cy} ${x2} ${y2}`;
+        var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", pathStr);
+        path.setAttribute("stroke", "red");
+        path.setAttribute("stroke-width", "4");
+        path.setAttribute("fill", "none");
+        if (dashed) path.setAttribute("stroke-dasharray", "10,6");
+        svg.appendChild(path);
+      }
+      doublePairs.forEach(pair => drawArch(pair, false));
+      floatPairs.forEach(pair => drawArch(pair, true));
+    }
+    
+    var roomLayout = [
+      { label: "5", row: 1, col: 2 },
+      { label: "6", row: 1, col: 3 },
+      { label: "7", row: 1, col: 4 },
+      { label: "8", row: 1, col: 5 },
+      { label: "4", row: 2, col: 1 },
+      { label: "9", row: 2, col: 6 },
+      { label: "3", row: 3, col: 1 },
+      { label: "10", row: 3, col: 6 },
+      { label: "2", row: 4, col: 1 },
+      { label: "11", row: 4, col: 6 },
+      { label: "1", row: 5, col: 1 },
+      { label: "12", row: 5, col: 6 },
+      { label: "13", row: 6, col: 6 },
+      { label: "14", row: 7, col: 6 },
+      { label: "15", row: 8, col: 6 },
+      { label: "18", row: 9, col: 3 },
+      { label: "17", row: 9, col: 4 },
+      { label: "16", row: 9, col: 5 }
+    ];
+    
+    function generateUnitDiagram() {
+      var container = document.getElementById("diagramContainer");
+      container.querySelectorAll(".room").forEach(function(room) { room.remove(); });
+      roomLayout.forEach(function(roomObj) {
+        var roomDiv = document.createElement("div");
+        roomDiv.className = "room";
+        roomDiv.style.gridRow = roomObj.row;
+        roomDiv.style.gridColumn = roomObj.col;
+        roomDiv.dataset.roomId = roomObj.label;
+        var roomNumberDiv = document.createElement("div");
+        roomNumberDiv.className = "room-number";
+        roomNumberDiv.textContent = roomObj.label;
+        roomDiv.appendChild(roomNumberDiv);
+        var labelsContainer = document.createElement("div");
+        labelsContainer.className = "room-labels";
+        roomDiv.appendChild(labelsContainer);
+        roomDiv.addEventListener("click", function(e) {
+          if (this.classList.contains("assigned")) {
+            if (
+              (currentMode === "single" && this.classList.contains("single")) ||
+              (currentMode === "double" && this.classList.contains("double")) ||
+              (currentMode === "float" && this.classList.contains("float")) ||
+              (currentMode === "empty" && this.classList.contains("empty"))
+            ) {
+              this.classList.remove("assigned", "single", "double", "float", "empty");
+              if (currentMode === "double") {
+                doublePairs = doublePairs.filter(pair =>
+                  pair[0] !== this && pair[1] !== this
+                );
+                updatePairLines();
+              }
+              if (currentMode === "float") {
+                floatPairs = floatPairs.filter(pair =>
+                  pair[0] !== this && pair[1] !== this
+                );
+                updatePairLines();
+              }
+              return;
+            }
+          }
+          if (currentLabel !== "") {
+            var labelToPlace = currentLabel;
+            if (currentLabel === "Pediatric") { labelToPlace = "P"; }
+            else if (currentLabel === "Floor Boarder") { labelToPlace = "FB"; }
+            var labelContainer = this.querySelector(".room-labels");
+            var existing = Array.from(labelContainer.children).find(function(el) {
+              return el.textContent === labelToPlace;
+            });
+            if (existing) {
+              labelContainer.removeChild(existing);
+            } else {
+              var newLabel = document.createElement("span");
+              newLabel.className = "room-label";
+              newLabel.textContent = labelToPlace;
+              labelContainer.appendChild(newLabel);
+            }
+            clearLabelSelection();
+            return;
+          }
+          if (currentMode === "double") {
+            this.classList.add("selected");
+            var selectedRooms = document.querySelectorAll(".room.selected");
+            if (selectedRooms.length === 2) {
+              selectedRooms.forEach(function(roomEl) {
+                roomEl.classList.remove("selected");
+                roomEl.classList.add("assigned", "double");
+              });
+              doublePairs.push([selectedRooms[0], selectedRooms[1]]);
+              updatePairLines();
+            }
+          } else if (currentMode === "float") {
+            this.classList.add("selected");
+            var selectedRooms = document.querySelectorAll(".room.selected");
+            if (selectedRooms.length === 2) {
+              selectedRooms.forEach(function(roomEl) {
+                roomEl.classList.remove("selected");
+                roomEl.classList.add("assigned", "float");
+              });
+              floatPairs.push([selectedRooms[0], selectedRooms[1]]);
+              updatePairLines();
+            }
+          } else if (currentMode === "single") {
+            this.classList.add("assigned", "single");
+          } else if (currentMode === "empty") {
+            this.classList.add("assigned", "empty");
+          }
+          e.stopPropagation();
+        });
+        container.appendChild(roomDiv);
+      });
+    }
+    
+    document.getElementById("resetPairsBtn").addEventListener("click", function() {
+      doublePairs = [];
+      floatPairs = [];
+      document.querySelectorAll(".room.double, .room.float").forEach(function(room) {
+        room.classList.remove("assigned", "double", "float");
+      });
+      updatePairLines();
+    });
+    
+    window.onload = function() {
+      generateUnitDiagram();
+      calculateNurses();
     };
-
-    computeLines();
-    window.addEventListener("resize", computeLines);
-    return () => window.removeEventListener("resize", computeLines);
-  }, [pairings, assignments]);
-
-  // Reset all states and inputs
-  const handleReset = () => {
-    setAssignments({});
-    setPairings([]);
-    setSelectedRooms([]);
-    setMode(null);
-    setNumNurses("");
-    setCustomLabel("");
-    setSelectedLabel(null);
-    setLines([]);
-  };
-
-  return (
-    <div className="p-4 relative" ref={containerRef}>
-      <h1 className="text-xl font-bold mb-4">Shift Assignment Worksheet</h1>
-      <div className="mb-4 flex items-center gap-4">
-        <label className="font-bold">Number of Nurses:</label>
-        <Input
-          type="number"
-          value={numNurses}
-          onChange={(e) => setNumNurses(e.target.value)}
-          className="border p-2 w-20"
-        />
-      </div>
-      <div className="flex gap-2 mb-4">
-        {labels.map((label) => (
-          <Button key={label} onClick={() => setSelectedLabel(label)}>
-            {label}
-          </Button>
-        ))}
-        <Input
-          type="text"
-          value={customLabel}
-          onChange={(e) => setCustomLabel(e.target.value)}
-          placeholder="Enter custom label"
-          className="border p-2"
-        />
-        <Button onClick={() => { if(customLabel) { setSelectedLabel(customLabel); } }}>
-          Add Custom Label
-        </Button>
-      </div>
-      
-      {/* SVG overlay to draw lines between paired rooms */}
-      <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
-        {lines.map((line, index) => (
-          <line
-            key={index}
-            x1={line.x1}
-            y1={line.y1}
-            x2={line.x2}
-            y2={line.y2}
-            stroke="blue"
-            strokeWidth="2"
-          />
-        ))}
-      </svg>
-      
-      <div className="grid gap-2">
-        {unitLayout.map((row, rowIndex) => (
-          <div key={rowIndex} className="flex gap-2">
-            {row.map((room, colIndex) => (
-              room ? (
-                <div
-                  key={room}
-                  ref={(el) => (roomRefs.current[room] = el)}
-                  className={`p-4 border w-24 h-24 flex items-center justify-center cursor-pointer 
-                    ${assignments[room]?.single ? 'border-4 border-green-500 rounded-full' : ''} 
-                    ${assignments[room]?.empty ? 'bg-red-500' : ''}`}
-                  onClick={() => handleRoomClick(room)}
-                >
-                  {room}
-                  <div className="text-xs mt-1">
-                    {assignments[room]?.labels?.join(', ')}
-                  </div>
-                </div>
-              ) : (
-                <div key={colIndex} className="p-4 w-24 h-24" />
-              )
-            ))}
-          </div>
-        ))}
-      </div>
-      
-      <div className="mt-4 text-lg font-bold">
-        <p>Single Rooms Marked: {Object.values(assignments).filter(room => room.single).length}</p>
-        <p>Pairs Created: {pairings.length}</p>
-        <p>
-          Total Assignments:{" "}
-          {Object.values(assignments).filter(room => room.single).length + pairings.length}
-        </p>
-      </div>
-      
-      {/* Display pairings as a list */}
-      <div className="mt-2">
-        <h2 className="font-bold">Pairings:</h2>
-        {pairings.map((pair, idx) => (
-          <p key={idx}>{pair.join(" & ")}</p>
-        ))}
-      </div>
-      
-      <div className="mt-4 flex gap-4">
-        <Button onClick={() => setMode("single")} className="bg-green-500">
-          Mark Single
-        </Button>
-        <Button onClick={() => setMode("empty")} className="bg-red-500">
-          Mark Empty
-        </Button>
-        <Button onClick={() => setMode("pair")} className="bg-blue-500">
-          Pair Patients
-        </Button>
-      </div>
-      
-      <div className="mt-4 flex gap-4">
-        <Button onClick={handleReset} variant="destructive">
-          Reset
-        </Button>
-        <Button onClick={() => window.print()} variant="default">
-          Print
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-export default ShiftAssignmentWorksheet;
+  </script>
+</body>
+</html>
