@@ -1,0 +1,222 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+const unitLayout = [
+  ["", "Room 5", "Room 6", "Room 7", "Room 8"],
+  ["Room 4", "", "", "", "", "Room 9"],
+  ["Room 3", "", "", "", "", "Room 10"],
+  ["Room 2", "", "", "", "", "Room 11"],
+  ["Room 1", "", "", "", "", "Room 12"],
+  ["", "", "", "", "", "Room 13"],
+  ["", "", "", "", "", "Room 14"],
+  ["", "", "", "", "", "Room 15"],
+  ["", "", "Room 18", "Room 17", "Room 16"]
+];
+
+const labels = ["WR", "OR", "AAP", "Pediatric", "CRRT", "Floor Boarder"];
+
+const ShiftAssignmentWorksheet = () => {
+  const [assignments, setAssignments] = useState({});
+  const [selectedLabel, setSelectedLabel] = useState(null);
+  const [customLabel, setCustomLabel] = useState("");
+  const [mode, setMode] = useState(null);
+  const [numNurses, setNumNurses] = useState("");
+  const [pairings, setPairings] = useState([]);
+  const [selectedRooms, setSelectedRooms] = useState([]);
+  const [lines, setLines] = useState([]);
+  
+  // Container ref for computing line positions
+  const containerRef = useRef(null);
+  // Room refs for each room element
+  const roomRefs = useRef({});
+
+  // Handle clicks on room boxes based on the current mode/label selection
+  const handleRoomClick = (room) => {
+    setAssignments((prev) => {
+      const updated = { ...prev };
+      if (mode === "single") {
+        updated[room] = { ...updated[room], single: !updated[room]?.single, empty: false };
+      } else if (mode === "empty") {
+        updated[room] = { ...updated[room], empty: !updated[room]?.empty, single: false };
+      } else if (mode === "pair") {
+        setSelectedRooms((prevRooms) => {
+          const updatedRooms = [...prevRooms, room];
+          if (updatedRooms.length === 2) {
+            setPairings(prevPairings => [...prevPairings, updatedRooms]);
+            return [];
+          }
+          return updatedRooms;
+        });
+      } else if (selectedLabel) {
+        // Toggle label ensuring no duplicates in a room's labels
+        const currentLabels = updated[room]?.labels || [];
+        if (currentLabels.includes(selectedLabel)) {
+          updated[room] = {
+            ...updated[room],
+            labels: currentLabels.filter(label => label !== selectedLabel)
+          };
+        } else {
+          updated[room] = {
+            ...updated[room],
+            labels: [...currentLabels, selectedLabel]
+          };
+        }
+      }
+      return updated;
+    });
+  };
+
+  // Compute line positions for each pairing
+  useEffect(() => {
+    const computeLines = () => {
+      if (!containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const newLines = pairings.map(pair => {
+        const [room1, room2] = pair;
+        const el1 = roomRefs.current[room1];
+        const el2 = roomRefs.current[room2];
+        if (el1 && el2) {
+          const rect1 = el1.getBoundingClientRect();
+          const rect2 = el2.getBoundingClientRect();
+          const x1 = rect1.left + rect1.width / 2 - containerRect.left;
+          const y1 = rect1.top + rect1.height / 2 - containerRect.top;
+          const x2 = rect2.left + rect2.width / 2 - containerRect.left;
+          const y2 = rect2.top + rect2.height / 2 - containerRect.top;
+          return { x1, y1, x2, y2 };
+        }
+        return null;
+      }).filter(line => line !== null);
+      setLines(newLines);
+    };
+
+    computeLines();
+    window.addEventListener("resize", computeLines);
+    return () => window.removeEventListener("resize", computeLines);
+  }, [pairings, assignments]);
+
+  // Reset all states and inputs
+  const handleReset = () => {
+    setAssignments({});
+    setPairings([]);
+    setSelectedRooms([]);
+    setMode(null);
+    setNumNurses("");
+    setCustomLabel("");
+    setSelectedLabel(null);
+    setLines([]);
+  };
+
+  return (
+    <div className="p-4 relative" ref={containerRef}>
+      <h1 className="text-xl font-bold mb-4">Shift Assignment Worksheet</h1>
+      <div className="mb-4 flex items-center gap-4">
+        <label className="font-bold">Number of Nurses:</label>
+        <Input
+          type="number"
+          value={numNurses}
+          onChange={(e) => setNumNurses(e.target.value)}
+          className="border p-2 w-20"
+        />
+      </div>
+      <div className="flex gap-2 mb-4">
+        {labels.map((label) => (
+          <Button key={label} onClick={() => setSelectedLabel(label)}>
+            {label}
+          </Button>
+        ))}
+        <Input
+          type="text"
+          value={customLabel}
+          onChange={(e) => setCustomLabel(e.target.value)}
+          placeholder="Enter custom label"
+          className="border p-2"
+        />
+        <Button onClick={() => { if(customLabel) { setSelectedLabel(customLabel); } }}>
+          Add Custom Label
+        </Button>
+      </div>
+      
+      {/* SVG overlay to draw lines between paired rooms */}
+      <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
+        {lines.map((line, index) => (
+          <line
+            key={index}
+            x1={line.x1}
+            y1={line.y1}
+            x2={line.x2}
+            y2={line.y2}
+            stroke="blue"
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+      
+      <div className="grid gap-2">
+        {unitLayout.map((row, rowIndex) => (
+          <div key={rowIndex} className="flex gap-2">
+            {row.map((room, colIndex) => (
+              room ? (
+                <div
+                  key={room}
+                  ref={(el) => (roomRefs.current[room] = el)}
+                  className={`p-4 border w-24 h-24 flex items-center justify-center cursor-pointer 
+                    ${assignments[room]?.single ? 'border-4 border-green-500 rounded-full' : ''} 
+                    ${assignments[room]?.empty ? 'bg-red-500' : ''}`}
+                  onClick={() => handleRoomClick(room)}
+                >
+                  {room}
+                  <div className="text-xs mt-1">
+                    {assignments[room]?.labels?.join(', ')}
+                  </div>
+                </div>
+              ) : (
+                <div key={colIndex} className="p-4 w-24 h-24" />
+              )
+            ))}
+          </div>
+        ))}
+      </div>
+      
+      <div className="mt-4 text-lg font-bold">
+        <p>Single Rooms Marked: {Object.values(assignments).filter(room => room.single).length}</p>
+        <p>Pairs Created: {pairings.length}</p>
+        <p>
+          Total Assignments:{" "}
+          {Object.values(assignments).filter(room => room.single).length + pairings.length}
+        </p>
+      </div>
+      
+      {/* Display pairings as a list */}
+      <div className="mt-2">
+        <h2 className="font-bold">Pairings:</h2>
+        {pairings.map((pair, idx) => (
+          <p key={idx}>{pair.join(" & ")}</p>
+        ))}
+      </div>
+      
+      <div className="mt-4 flex gap-4">
+        <Button onClick={() => setMode("single")} className="bg-green-500">
+          Mark Single
+        </Button>
+        <Button onClick={() => setMode("empty")} className="bg-red-500">
+          Mark Empty
+        </Button>
+        <Button onClick={() => setMode("pair")} className="bg-blue-500">
+          Pair Patients
+        </Button>
+      </div>
+      
+      <div className="mt-4 flex gap-4">
+        <Button onClick={handleReset} variant="destructive">
+          Reset
+        </Button>
+        <Button onClick={() => window.print()} variant="default">
+          Print
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+export default ShiftAssignmentWorksheet;
